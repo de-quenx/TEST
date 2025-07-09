@@ -50,10 +50,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y aria2 unzip
 
-      - name: Download kernel archive via aria2c
+      - name: Download kernel archive via aria2c (silent)
         run: |
-          echo "Downloading kernel archive from ${{ steps.vars.outputs.kernel_url }}"
-          aria2c -x 16 -s 16 -k 1M -o kernel-archive "${{ steps.vars.outputs.kernel_url }}"
+          aria2c --console-log-level=error -x 16 -s 16 -k 1M -o kernel-archive "${{ steps.vars.outputs.kernel_url }}"
 
       - name: Determine archive file and extract accordingly
         run: |
@@ -63,7 +62,7 @@ jobs:
           mkdir kernel-extracted
 
           if [[ $ARCHIVE_TYPE =~ gzip ]]; then
-            echo "Detected gzip archive (.tar.gz or .tar.gz compressed)"
+            echo "Detected gzip archive (.tar.gz or .tar)"
             tar -xzf kernel-archive -C kernel-extracted
           elif [[ $ARCHIVE_TYPE =~ Zip ]]; then
             echo "Detected ZIP archive"
@@ -76,11 +75,25 @@ jobs:
             exit 1
           fi
 
-      - name: Clone target repo
+      - name: Normalize target_repo input
+        id: fixrepo
         run: |
-          git clone https://x-access-token:${PAT}@github.com/${{ steps.vars.outputs.target_repo }}.git target-repo
+          repo="${{ steps.vars.outputs.target_repo }}"
+          if [[ "$repo" == https://github.com/* ]]; then
+            repo="${repo#https://github.com/}"
+            repo="${repo%/}"
+          fi
+          echo "normalized_repo=$repo" >> $GITHUB_OUTPUT
+
+      - name: Clone target repo
+        env:
+          PAT: ${{ secrets.TARGET_REPO_PAT }}
+          TARGET_REPO: ${{ steps.fixrepo.outputs.normalized_repo }}
+          TARGET_BRANCH: ${{ steps.vars.outputs.target_branch }}
+        run: |
+          git clone https://x-access-token:${PAT}@github.com/${TARGET_REPO}.git target-repo
           cd target-repo
-          git checkout ${{ steps.vars.outputs.target_branch }} || git checkout -b ${{ steps.vars.outputs.target_branch }}
+          git checkout ${TARGET_BRANCH} || git checkout -b ${TARGET_BRANCH}
 
       - name: Copy kernel files to target repo folder kernel/<version>/
         run: |
