@@ -40,20 +40,6 @@ jobs:
           fi
           echo "normalized_repo=$repo" >> $GITHUB_OUTPUT
 
-      - name: Extract version from kernel URL
-        id: version_extract
-        run: |
-          filename=$(basename "${{ steps.vars.outputs.kernel_url }}")
-          echo "Filename: $filename"
-
-          if [[ "$filename" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
-            version=${BASH_REMATCH[1]}
-          else
-            version="unknown"
-          fi
-
-          echo "version=$version" >> $GITHUB_OUTPUT
-
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -65,7 +51,6 @@ jobs:
           url="${{ steps.vars.outputs.kernel_url }}"
           echo "Downloading from $url"
 
-          # Detect Mega URL
           if [[ "$url" =~ mega\.nz ]]; then
             echo "Detected Mega.nz URL"
             megadl --path=./kernel-archive-download "$url"
@@ -75,25 +60,50 @@ jobs:
             cd ..
             rm -rf kernel-archive-download
 
-          # Detect Google Drive URL
           elif [[ "$url" =~ drive.google.com ]]; then
             echo "Detected Google Drive URL"
             FILE_ID=$(echo "$url" | grep -oP '(?<=/d/)[^/]+')
             if [ -z "$FILE_ID" ]; then
-              echo "Trying alternative extraction for file id"
-              # alternative pattern for sharing links
               FILE_ID=$(echo "$url" | grep -oP '(?<=id=)[^&]+')
             fi
             if [ -z "$FILE_ID" ]; then
               echo "ERROR: Cannot extract Google Drive file ID"
               exit 1
             fi
-            gdown "https://drive.google.com/uc?id=$FILE_ID" -O kernel-archive
+            mkdir -p kernel-archive-download
+            cd kernel-archive-download
+            gdown "https://drive.google.com/uc?id=$FILE_ID"
+            cd ..
 
           else
-            # Default: aria2c for github/http/mediafire direct link
             aria2c -q -x 16 -s 16 -k 1M -o kernel-archive "$url"
           fi
+
+      - name: Extract version from downloaded file
+        id: version_extract
+        run: |
+          if [ -f kernel-archive ]; then
+            filename=$(basename kernel-archive)
+          else
+            files=(kernel-archive-download/*)
+            if [ ${#files[@]} -gt 0 ]; then
+              filename=$(basename "${files[0]}")
+              # move file dari folder download ke kernel-archive supaya proses ekstrak sama
+              mv "${files[0]}" kernel-archive
+              rm -rf kernel-archive-download
+            else
+              echo "ERROR: No downloaded files found"
+              exit 1
+            fi
+          fi
+
+          echo "Filename: $filename"
+          if [[ "$filename" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
+            version=${BASH_REMATCH[1]}
+          else
+            version="unknown"
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
 
       - name: Determine archive type and extract accordingly
         run: |
