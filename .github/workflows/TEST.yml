@@ -1,14 +1,14 @@
-name: TEST
+name: TEST v2
 
 on:
   workflow_dispatch:
     inputs:
       kernel_url:
-        description: 'Input URL file kernel (aria2c download)'
+        description: 'URL kernel (GitHub raw / Mediafire direct / Mega public)'
         required: true
         type: string
       target_repo:
-        description: 'Target repository in format owner/repo or full URL'
+        description: 'Target repo in format owner/repo or full URL'
         required: true
         type: string
       target_branch:
@@ -54,17 +54,33 @@ jobs:
 
           echo "version=$version" >> $GITHUB_OUTPUT
 
-      - name: Install aria2 and unzip
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y aria2 unzip
+          sudo apt-get install -y aria2 unzip megatools
 
-      - name: Download kernel archive via aria2c
+      - name: Download kernel archive depending on URL
         run: |
-          echo "Downloading kernel archive from ${{ steps.vars.outputs.kernel_url }}"
-          aria2c -q -x 16 -s 16 -k 1M -o kernel-archive "${{ steps.vars.outputs.kernel_url }}"
+          url="${{ steps.vars.outputs.kernel_url }}"
+          echo "Downloading from $url"
 
-      - name: Determine archive file and extract accordingly
+          # Detect Mega URL
+          if [[ "$url" =~ mega\.nz ]]; then
+            echo "Detected Mega.nz URL"
+            megadl --path=./kernel-archive-download "$url"
+            # Pastikan file di folder kernel-archive-download, pindahkan ke ./kernel-archive
+            cd kernel-archive-download
+            # Ambil file pertama (misal satu file)
+            file=$(ls | head -n 1)
+            mv "$file" ../kernel-archive
+            cd ..
+            rm -rf kernel-archive-download
+          else
+            # Gunakan aria2c untuk URL selain Mega
+            aria2c -q -x 16 -s 16 -k 1M -o kernel-archive "$url"
+          fi
+
+      - name: Determine archive type and extract accordingly
         run: |
           file kernel-archive
           ARCHIVE_TYPE=$(file kernel-archive)
@@ -72,13 +88,10 @@ jobs:
           mkdir kernel-extracted
 
           if [[ $ARCHIVE_TYPE =~ gzip ]]; then
-            echo "Detected gzip archive (.tar.gz or .tar)"
             tar -xzf kernel-archive -C kernel-extracted
           elif [[ $ARCHIVE_TYPE =~ Zip ]]; then
-            echo "Detected ZIP archive"
             unzip kernel-archive -d kernel-extracted
           elif [[ $ARCHIVE_TYPE =~ POSIX.*tar ]]; then
-            echo "Detected tar archive"
             tar -xf kernel-archive -C kernel-extracted
           else
             echo "Unknown archive format!"
@@ -91,12 +104,20 @@ jobs:
           cd target-repo
           git checkout ${{ steps.vars.outputs.target_branch }} || git checkout -b ${{ steps.vars.outputs.target_branch }}
 
-      - name: Copy kernel files to target repo folder kernel/<version>/
+      - name: Copy kernel files to target repo folder kernel/<version>/ with flattening
         run: |
           cd target-repo
           mkdir -p kernel/${{ steps.version_extract.outputs.version }}
           rm -rf kernel/${{ steps.version_extract.outputs.version }}/* || true
-          cp -R ../kernel-extracted/* kernel/${{ steps.version_extract.outputs.version }}/
+
+          cd ../kernel-extracted
+          shopt -s nullglob
+          entries=(*/)
+          if [ ${#entries[@]} -eq 1 ]; then
+            cp -R "${entries[0]}"* ../target-repo/kernel/${{ steps.version_extract.outputs.version }}/
+          else
+            cp -R * ../target-repo/kernel/${{ steps.version_extract.outputs.version }}/
+          fi
 
       - name: Commit and push changes
         env:
