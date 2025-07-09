@@ -31,6 +31,16 @@ jobs:
           echo "target_repo=${{ github.event.inputs.target_repo }}" >> $GITHUB_OUTPUT
           echo "target_branch=${{ github.event.inputs.target_branch || 'main' }}" >> $GITHUB_OUTPUT
 
+      - name: Normalize target_repo input
+        id: fixrepo
+        run: |
+          repo="${{ steps.vars.outputs.target_repo }}"
+          if [[ "$repo" == https://github.com/* ]]; then
+            repo="${repo#https://github.com/}"
+            repo="${repo%/}"
+          fi
+          echo "normalized_repo=$repo" >> $GITHUB_OUTPUT
+
       - name: Extract version from kernel URL
         id: version_extract
         run: |
@@ -75,16 +85,6 @@ jobs:
             exit 1
           fi
 
-      - name: Normalize target_repo input
-        id: fixrepo
-        run: |
-          repo="${{ steps.vars.outputs.target_repo }}"
-          if [[ "$repo" == https://github.com/* ]]; then
-            repo="${repo#https://github.com/}"
-            repo="${repo%/}"
-          fi
-          echo "normalized_repo=$repo" >> $GITHUB_OUTPUT
-
       - name: Clone target repo
         env:
           PAT: ${{ secrets.TARGET_REPO_PAT }}
@@ -102,7 +102,11 @@ jobs:
           rm -rf kernel/${{ steps.version_extract.outputs.version }}/* || true
           cp -R ../kernel-extracted/* kernel/${{ steps.version_extract.outputs.version }}/
 
-      - name: Commit and push changes
+      - name: Commit and push changes using PAT-authenticated remote
+        env:
+          PAT: ${{ secrets.TARGET_REPO_PAT }}
+          TARGET_REPO: ${{ steps.fixrepo.outputs.normalized_repo }}
+          TARGET_BRANCH: ${{ steps.vars.outputs.target_branch }}
         run: |
           cd target-repo
           git config user.name "github-actions"
@@ -112,5 +116,7 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Update kernel ${{ steps.version_extract.outputs.version }} files from workflow run #${{ github.run_number }}"
-            git push origin ${{ steps.vars.outputs.target_branch }}
+            # Set remote URL dengan PAT agar push berhasil authenticasi
+            git remote set-url origin https://x-access-token:${PAT}@github.com/${TARGET_REPO}.git
+            git push origin ${TARGET_BRANCH}
           fi
