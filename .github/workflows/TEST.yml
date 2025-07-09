@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       target_repo:
-        description: 'Target repository in format owner/repo'
+        description: 'Target repository in format owner/repo or full URL'
         required: true
         type: string
       target_branch:
@@ -28,13 +28,12 @@ jobs:
         id: vars
         run: |
           echo "kernel_url=${{ github.event.inputs.kernel_url }}" >> $GITHUB_OUTPUT
-          echo "target_repo=${{ github.event.inputs.target_repo }}" >> $GITHUB_OUTPUT
           echo "target_branch=${{ github.event.inputs.target_branch || 'main' }}" >> $GITHUB_OUTPUT
 
       - name: Normalize target_repo input
         id: fixrepo
         run: |
-          repo="${{ steps.vars.outputs.target_repo }}"
+          repo="${{ github.event.inputs.target_repo }}"
           if [[ "$repo" == https://github.com/* ]]; then
             repo="${repo#https://github.com/}"
             repo="${repo%/}"
@@ -60,9 +59,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y aria2 unzip
 
-      - name: Download kernel archive via aria2c (silent)
+      - name: Download kernel archive via aria2c
         run: |
-          aria2c --console-log-level=error -x 16 -s 16 -k 1M -o kernel-archive "${{ steps.vars.outputs.kernel_url }}"
+          echo "Downloading kernel archive from ${{ steps.vars.outputs.kernel_url }}"
+          aria2c -q -x 16 -s 16 -k 1M -o kernel-archive "${{ steps.vars.outputs.kernel_url }}"
 
       - name: Determine archive file and extract accordingly
         run: |
@@ -86,14 +86,10 @@ jobs:
           fi
 
       - name: Clone target repo
-        env:
-          PAT: ${{ secrets.TARGET_REPO_PAT }}
-          TARGET_REPO: ${{ steps.fixrepo.outputs.normalized_repo }}
-          TARGET_BRANCH: ${{ steps.vars.outputs.target_branch }}
         run: |
-          git clone https://x-access-token:${PAT}@github.com/${TARGET_REPO}.git target-repo
+          git clone https://x-access-token:${PAT}@github.com/${{ steps.fixrepo.outputs.normalized_repo }}.git target-repo
           cd target-repo
-          git checkout ${TARGET_BRANCH} || git checkout -b ${TARGET_BRANCH}
+          git checkout ${{ steps.vars.outputs.target_branch }} || git checkout -b ${{ steps.vars.outputs.target_branch }}
 
       - name: Copy kernel files to target repo folder kernel/<version>/
         run: |
@@ -102,11 +98,9 @@ jobs:
           rm -rf kernel/${{ steps.version_extract.outputs.version }}/* || true
           cp -R ../kernel-extracted/* kernel/${{ steps.version_extract.outputs.version }}/
 
-      - name: Commit and push changes using PAT-authenticated remote
+      - name: Commit and push changes
         env:
           PAT: ${{ secrets.TARGET_REPO_PAT }}
-          TARGET_REPO: ${{ steps.fixrepo.outputs.normalized_repo }}
-          TARGET_BRANCH: ${{ steps.vars.outputs.target_branch }}
         run: |
           cd target-repo
           git config user.name "github-actions"
@@ -116,7 +110,6 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Update kernel ${{ steps.version_extract.outputs.version }} files from workflow run #${{ github.run_number }}"
-            # Set remote URL dengan PAT agar push berhasil authenticasi
-            git remote set-url origin https://x-access-token:${PAT}@github.com/${TARGET_REPO}.git
-            git push origin ${TARGET_BRANCH}
+            git remote set-url origin https://x-access-token:${PAT}@github.com/${{ steps.fixrepo.outputs.normalized_repo }}.git
+            git push origin ${{ steps.vars.outputs.target_branch }}
           fi
