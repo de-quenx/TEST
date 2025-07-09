@@ -1,14 +1,14 @@
-name: TEST v2
+name: TEST v3
 
 on:
   workflow_dispatch:
     inputs:
       kernel_url:
-        description: 'URL kernel (GitHub raw / Mediafire direct / Mega public)'
+        description: 'URL kernel file (GitHub, Mediafire direct, Mega.nz, Google Drive)'
         required: true
         type: string
       target_repo:
-        description: 'Target repo in format owner/repo or full URL'
+        description: 'Target repository (owner/repo or full URL)'
         required: true
         type: string
       target_branch:
@@ -57,7 +57,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y aria2 unzip megatools
+          sudo apt-get install -y aria2 unzip megatools python3-pip
+          python3 -m pip install --upgrade gdown
 
       - name: Download kernel archive depending on URL
         run: |
@@ -68,15 +69,29 @@ jobs:
           if [[ "$url" =~ mega\.nz ]]; then
             echo "Detected Mega.nz URL"
             megadl --path=./kernel-archive-download "$url"
-            # Pastikan file di folder kernel-archive-download, pindahkan ke ./kernel-archive
             cd kernel-archive-download
-            # Ambil file pertama (misal satu file)
             file=$(ls | head -n 1)
             mv "$file" ../kernel-archive
             cd ..
             rm -rf kernel-archive-download
+
+          # Detect Google Drive URL
+          elif [[ "$url" =~ drive.google.com ]]; then
+            echo "Detected Google Drive URL"
+            FILE_ID=$(echo "$url" | grep -oP '(?<=/d/)[^/]+')
+            if [ -z "$FILE_ID" ]; then
+              echo "Trying alternative extraction for file id"
+              # alternative pattern for sharing links
+              FILE_ID=$(echo "$url" | grep -oP '(?<=id=)[^&]+')
+            fi
+            if [ -z "$FILE_ID" ]; then
+              echo "ERROR: Cannot extract Google Drive file ID"
+              exit 1
+            fi
+            gdown "https://drive.google.com/uc?id=$FILE_ID" -O kernel-archive
+
           else
-            # Gunakan aria2c untuk URL selain Mega
+            # Default: aria2c for github/http/mediafire direct link
             aria2c -q -x 16 -s 16 -k 1M -o kernel-archive "$url"
           fi
 
