@@ -88,7 +88,6 @@ jobs:
             files=(kernel-archive-download/*)
             if [ ${#files[@]} -gt 0 ]; then
               filename=$(basename "${files[0]}")
-              # move file dari folder download ke kernel-archive supaya proses ekstrak sama
               mv "${files[0]}" kernel-archive
               rm -rf kernel-archive-download
             else
@@ -99,7 +98,7 @@ jobs:
 
           echo "Filename: $filename"
 
-          version=$(echo "$filename" | grep -oP '[0-9]+\.[0-9]+\.[0-9]+[-A-Za-z0-9+]*' || echo "")
+          version=$(echo "$filename" | grep -oP '[0-9]+\.[0-9]+\.[0-9]+[-+A-Za-z0-9]*' || echo "")
 
           if [ -z "$version" ]; then
             echo "Version extraction failed, setting to unknown"
